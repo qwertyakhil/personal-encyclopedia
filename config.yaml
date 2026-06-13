@@ -9,27 +9,38 @@ vault:
   outputs: "30-Outputs"
   system: "90-System"
 
-domain:
-  default: "ai"
-  buckets:
-    - news     # releases, updates, trends
-    - tools    # specific tools/services
-    - build    # project ideas, how-tos, vibe-coding
-    - craft    # PM thinking, shipping, evergreen skills
+# Domains — LLM determines which domain each note belongs to.
+# Folders created automatically under 10-Raw/<domain>/<bucket>/
+domains:
+  - ai-tech      # AI models, LLMs, agents, developer tools, software engineering
+  - web-dev      # Frontend, backend, APIs, databases, DevOps, web frameworks
+  - data         # Data engineering, analytics, SQL, pipelines, visualization
+  - business     # Startups, GTM, fundraising, product strategy, growth, marketing
+  - design       # UI/UX, design systems, Figma, user research, visual design
+  - career       # Job search, personal growth, productivity, leadership
+  - _unsorted    # Fallback: ambiguous or multi-domain content
+
+# Buckets — universal content types, same across all domains
+buckets:
+  - news       # Releases, announcements, trends — skim to stay current
+  - tools      # Specific tools/services — reference when evaluating or using
+  - build      # How-tos, tutorials, implementation patterns — act on
+  - research   # Deep analysis, papers, benchmarks — study
+  - strategy   # Frameworks, mental models, decision-making — apply
+  - craft      # Evergreen skills, mindset, communication — absorb
+  - interview  # Person-focused: founder stories, career journeys, conversations
 
 ollama:
   model: "gemma4:31b-cloud"
   base_url: "http://localhost:11434"
-  timeout_seconds: 120
+  timeout_seconds: 180
 
 categorize:
-  # Confidence threshold below which note goes to _unsorted
-  min_confidence: 0.6
-  # Max transcript chars sent to LLM (keep cost/time low)
-  max_transcript_chars: 6000
+  # Single-pass char limit (~37K tokens, covers ~3hr video; gemma4 has 128K context)
+  single_pass_limit: 150000
+  # Chunk size for map-reduce on very long transcripts
+  chunk_size: 30000
 
 pipeline:
-  # Log file location (relative to vault system folder)
   log_file: "pipeline.log"
-  # Failed/retry queue
   retry_queue: "retry_queue.yaml"

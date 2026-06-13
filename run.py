@@ -87,21 +87,28 @@ def _process_item(item_path: Path, vault_root: Path, cfg: dict, log):
 
     log.info(f"  Type: {item.source_type} | URL: {item.source_url or '(none)'}")
 
-    # 2. Ingest → raw content
-    content = ingest(item)
+    # 2. Ingest → raw content + metadata (title, channel for YouTube)
+    content, metadata = ingest(item)
     log.info(f"  Ingested {len(content)} chars")
 
-    # 3. Build note skeleton from item
+    # Title priority: frontmatter (web clipper sets this) → oEmbed metadata → empty
+    title = item.title or metadata.get("title", "")
+    channel = metadata.get("channel", "")
+    if channel:
+        log.info(f"  Channel: {channel}")
+
+    # 3. Build note skeleton — domain starts as _unsorted, categorize will set it
     note = NoteSchema(
-        title=item.title or "",
+        title=title,
         source_url=item.source_url or "",
-        source_type=item.source_type if item.source_type in ("youtube", "instagram", "article", "document") else "article",
-        domain=cfg["domain"]["default"],
+        source_type=item.source_type if item.source_type in ("youtube", "instagram", "article", "document", "clipped") else "article",
+        channel=channel,
+        # domain intentionally left as default "_unsorted" — LLM sets it in step 4
     )
 
-    # 4. Categorize → fills bucket, tags, summary
+    # 4. Categorize → fills domain, bucket, tags, summary
     note = categorize(note, content)
-    log.info(f"  Categorized → bucket: {note.bucket} | tags: {note.tags}")
+    log.info(f"  Categorized → domain: {note.domain} | bucket: {note.bucket} | tags: {note.tags}")
 
     # 5. File note into vault
     filed_path = file_note(note, content, str(vault_root))
