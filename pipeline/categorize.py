@@ -8,7 +8,7 @@ import urllib.request
 from pipeline import NoteSchema, BUCKETS
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "gemma3:27b"
+MODEL = "gemma4:31b-cloud"
 
 SYSTEM_PROMPT = """You are a knowledge categorizer for a personal AI/tech knowledge base.
 
