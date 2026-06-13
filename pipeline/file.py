@@ -71,4 +71,5 @@ def _slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     text = re.sub(r"[\s_]+", "-", text)
+    text = re.sub(r"-{2,}", "-", text)   # collapse multiple consecutive dashes
     return text.strip("-") or "note"
