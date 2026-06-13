@@ -127,8 +127,10 @@ def _ingest_youtube(url: str) -> tuple[str, dict]:
 
     # Stage 2: No captions at all → yt-dlp audio download + Whisper transcription
     log.info("  No captions found — falling back to yt-dlp + Whisper")
-    text = _audio_to_transcript(url)
-    return text, metadata
+    transcript, ydl_info = _audio_to_transcript(url)
+    description = ydl_info.get("description", "").strip()
+    content = f"[Description]\n{description}\n\n[Transcript]\n{transcript}" if description else transcript
+    return content, metadata
 
 
 # ── Instagram ──────────────────────────────────────────────────────────────────
@@ -136,28 +138,59 @@ def _ingest_youtube(url: str) -> tuple[str, dict]:
 def _ingest_instagram(url: str) -> tuple[str, dict]:
     """
     Instagram reels/posts: yt-dlp downloads audio, Whisper transcribes.
-    Returns (transcript, {}) — no oEmbed equivalent for Instagram metadata.
+    Also captures caption/description from the post.
+    Returns (caption + transcript, metadata).
     """
     log.info("  Instagram: downloading audio via yt-dlp")
-    text = _audio_to_transcript(url)
-    return text, {}
+    transcript, ydl_info = _audio_to_transcript(url)
+
+    description = ydl_info.get("description", "").strip()
+    content = f"[Caption]\n{description}\n\n[Transcript]\n{transcript}" if description else transcript
+
+    metadata = {
+        "title": ydl_info.get("title", ""),
+        "channel": ydl_info.get("uploader", "") or ydl_info.get("channel", ""),
+    }
+    return content, metadata
 
 
 # ── Shared: audio download + transcription ─────────────────────────────────────
 
-def _audio_to_transcript(url: str) -> str:
+def _audio_to_transcript(url: str) -> tuple[str, dict]:
     """
     Download audio from any yt-dlp-supported URL and transcribe with Whisper large-v3.
 
-    - Audio saved to a temp directory, deleted after transcription.
-    - Non-English audio auto-translated to English (Whisper task="translate").
-    - Model loaded once as a singleton for the pipeline run.
+    Steps:
+      1. Extract metadata (title, description, uploader) without downloading
+      2. Download audio to temp dir
+      3. Transcribe — auto-translate non-English to English
+      4. Clean up temp files
+
+    Returns (transcript, ydl_info_dict).
+    ydl_info contains: title, description, uploader, channel, etc.
 
     Free, local, no usage limits. Requires: yt-dlp, faster-whisper, ffmpeg.
     """
     import yt_dlp
     import os
 
+    # Step 1: Extract metadata only (no download)
+    ydl_info = {}
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            info = ydl.extract_info(url, download=False)
+            ydl_info = {
+                "title": info.get("title", ""),
+                "description": info.get("description", ""),
+                "uploader": info.get("uploader", ""),
+                "channel": info.get("channel", ""),
+            }
+            if ydl_info["description"]:
+                log.info(f"  Description fetched ({len(ydl_info['description'])} chars)")
+    except Exception as e:
+        log.warning(f"  Could not fetch metadata: {e}")
+
+    # Step 2: Download audio + transcribe
     with tempfile.TemporaryDirectory() as tmpdir:
         audio_path = os.path.join(tmpdir, "audio")
 
@@ -184,9 +217,9 @@ def _audio_to_transcript(url: str) -> str:
                 raise RuntimeError(f"yt-dlp produced no audio file for: {url}")
             audio_file = os.path.join(tmpdir, files[0])
 
+        # Step 3: Transcribe
         model = _get_whisper_model()
 
-        # First pass: detect language
         segments, info = model.transcribe(audio_file, beam_size=5)
         detected_lang = info.language
         log.info(f"  Whisper detected language: {detected_lang}")
@@ -194,12 +227,11 @@ def _audio_to_transcript(url: str) -> str:
         if detected_lang == "en":
             text = " ".join(seg.text for seg in segments)
         else:
-            # Non-English → translate to English in transcription pass
             log.info(f"  Translating {detected_lang} → English via Whisper")
             segments, _ = model.transcribe(audio_file, task="translate", beam_size=5)
             text = " ".join(seg.text for seg in segments)
 
-        return text.strip()
+        return text.strip(), ydl_info
 
 
 # ── Articles ───────────────────────────────────────────────────────────────────

@@ -98,9 +98,15 @@ career vocabulary:
 ━━━ SUMMARY ━━━
 2-3 sentences capturing the core insight and why it matters.
 
+━━━ TITLE ━━━
+If the content has no clear title (e.g. Instagram reel, podcast, video without caption),
+generate a concise descriptive title (5-10 words, title case). If a title is obvious from
+the content, use it. Otherwise leave as empty string.
+
 ━━━ OUTPUT FORMAT ━━━
 Return ONLY valid JSON, no explanation:
 {
+  "title": "...",
   "domain": "...",
   "bucket": "...",
   "tags": ["...", "...", "...", "..."],
@@ -196,6 +202,10 @@ def categorize(note: NoteSchema, transcript: str) -> NoteSchema:
     prompt = f"{CATEGORIZE_PROMPT}\n\nTranscript:\n{content_for_llm}"
     raw = _ollama(prompt, timeout=180)
     parsed = _parse_json_response(raw)
+
+    # Title — only fill if not already set (YouTube title comes from oEmbed)
+    if not note.title:
+        note.title = parsed.get("title", "").strip()
 
     # Domain — LLM-determined, validated against known list
     domain = parsed.get("domain", "_unsorted")
