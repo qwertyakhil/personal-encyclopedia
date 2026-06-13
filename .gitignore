@@ -1,0 +1,24 @@
+# Secrets
+.env
+
+# Virtualenv
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# macOS
+.DS_Store
+
+# Logs (keep structure, not content)
+*.log
+
+# Never commit the vault
+*.md
+!README.md

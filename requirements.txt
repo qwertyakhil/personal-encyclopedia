@@ -1,0 +1,16 @@
+# Knowledge Pipeline — dependencies
+# Install into the project virtualenv: python3.11 -m pip install -r requirements.txt
+#
+# Phase 0 (foundation)
+pyyaml
+
+# Phase 1 (YouTube path) — uncomment when starting Phase 1
+# youtube-transcript-api
+# python-frontmatter
+
+# Phase 2 (Instagram path) — uncomment when starting Phase 2
+# yt-dlp
+# faster-whisper
+
+# Phase 5 (Watcher / RSS feeds) — uncomment when starting Phase 5
+# feedparser

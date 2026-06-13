@@ -1,0 +1,35 @@
+# Knowledge Pipeline — Configuration
+# Edit paths and thresholds here. Never hardcode these in pipeline code.
+
+vault:
+  root: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Personal Encyclopedia"
+  inbox: "00-Inbox"
+  raw: "10-Raw"
+  wiki: "20-Wiki"
+  outputs: "30-Outputs"
+  system: "90-System"
+
+domain:
+  default: "ai"
+  buckets:
+    - news     # releases, updates, trends
+    - tools    # specific tools/services
+    - build    # project ideas, how-tos, vibe-coding
+    - craft    # PM thinking, shipping, evergreen skills
+
+ollama:
+  model: "gemma3:27b"
+  base_url: "http://localhost:11434"
+  timeout_seconds: 120
+
+categorize:
+  # Confidence threshold below which note goes to _unsorted
+  min_confidence: 0.6
+  # Max transcript chars sent to LLM (keep cost/time low)
+  max_transcript_chars: 6000
+
+pipeline:
+  # Log file location (relative to vault system folder)
+  log_file: "pipeline.log"
+  # Failed/retry queue
+  retry_queue: "retry_queue.yaml"
