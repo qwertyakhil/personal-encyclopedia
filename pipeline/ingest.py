@@ -1,17 +1,43 @@
 """
 Ingest stage.
 Takes an InboxItem and returns (raw_content, metadata) where:
-  - raw_content: transcript/article text as a string
+  - raw_content: transcript/article text as a string (always English)
   - metadata: dict with optional keys: title, channel
 
-Each source type has its own handler.
+Source routing:
+  youtube   → youtube-transcript-api (captions) → yt-dlp + Whisper fallback
+  instagram → yt-dlp + Whisper
+  article   → markitdown (URL fetch)
+  document  → markitdown (local file)
+  clipped   → pass-through (content already in note)
 """
 
 import json
+import logging
+import tempfile
 import urllib.request
 from pathlib import Path
+
 from pipeline.parser import InboxItem
 
+log = logging.getLogger(__name__)
+
+# ── Whisper model singleton ────────────────────────────────────────────────────
+# Loaded once on first use, reused for all transcriptions in a pipeline run.
+# large-v3: most accurate, ~3GB RAM, ~1.5B params. Worth it for a nightly batch.
+_whisper_model = None
+
+def _get_whisper_model():
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        log.info("Loading Whisper large-v3 model (first run may take a moment)...")
+        _whisper_model = WhisperModel("large-v3", device="cpu", compute_type="int8")
+        log.info("Whisper model loaded.")
+    return _whisper_model
+
+
+# ── Dispatcher ─────────────────────────────────────────────────────────────────
 
 def ingest(item: InboxItem) -> tuple[str, dict]:
     """
@@ -22,7 +48,7 @@ def ingest(item: InboxItem) -> tuple[str, dict]:
     if item.source_type == "youtube":
         return _ingest_youtube(item.source_url)
     elif item.source_type == "instagram":
-        raise NotImplementedError("Instagram ingest — Phase 2")
+        return _ingest_instagram(item.source_url)
     elif item.source_type == "article":
         return _ingest_article_url(item.source_url), {}
     elif item.source_type == "document":
@@ -38,12 +64,8 @@ def ingest(item: InboxItem) -> tuple[str, dict]:
 def _fetch_youtube_metadata(url: str) -> dict:
     """
     Fetch video title and channel name via YouTube's free oEmbed API.
-    No API key needed. Returns dict with 'title' and 'channel'.
-    Falls back to empty dict on any failure.
-
-    Works for both capture methods:
-    - Phone share (bare URL note — no frontmatter title, oEmbed is the only source)
-    - Web Clipper (title already in frontmatter — this is a fallback/verification)
+    No API key needed. Falls back to empty dict on any failure.
+    Works for both phone share (no frontmatter title) and Web Clipper (title already set).
     """
     try:
         oembed_url = f"https://www.youtube.com/oembed?url={url}&format=json"
@@ -60,18 +82,18 @@ def _fetch_youtube_metadata(url: str) -> dict:
 
 def _ingest_youtube(url: str) -> tuple[str, dict]:
     """
-    Fetch YouTube transcript via youtube-transcript-api.
-    Also fetches video title + channel via oEmbed (free, no API key).
+    YouTube ingest with two-stage fallback:
+      1. youtube-transcript-api: captions (instant, no download)
+         - English captions → use directly
+         - Non-English captions → translate to English via YouTube API
+      2. yt-dlp + Whisper: audio transcription (when captions unavailable)
+         - Handles live streams, creators who disable captions, any language
 
-    Priority: English captions → translate any available language to English.
-    Always returns English text — Hindi/Hinglish is translated at fetch time.
-
-    Returns (transcript_text, metadata_dict).
+    Always returns English text.
     """
     from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
     import re
 
-    # Extract video ID — handles watch?v=, youtu.be/, live/, shorts/, embed/
     match = re.search(r"(?:v=|youtu\.be/|live/|shorts/|embed/)([\w-]+)", url)
     if not match:
         raise ValueError(f"Could not extract video ID from URL: {url}")
@@ -82,36 +104,108 @@ def _ingest_youtube(url: str) -> tuple[str, dict]:
 
     api = YouTubeTranscriptApi()
 
-    # Try English captions first (manual or auto-generated)
+    # Stage 1a: English captions
     try:
         segments = api.fetch(video_id, languages=["en"])
         text = " ".join(seg.text for seg in segments)
+        log.info("  Transcript source: YouTube captions (English)")
         return text.strip(), metadata
     except NoTranscriptFound:
         pass
 
-    # No English captions — find any available transcript and translate to English
+    # Stage 1b: Non-English captions → translate to English
     try:
         transcript_list = api.list(video_id)
         available = list(transcript_list)
-        if not available:
-            raise NoTranscriptFound(video_id, [], [])
+        if available:
+            segments = available[0].translate("en").fetch()
+            text = " ".join(seg.text for seg in segments)
+            log.info(f"  Transcript source: YouTube captions (translated from {available[0].language_code})")
+            return text.strip(), metadata
+    except (NoTranscriptFound, TranscriptsDisabled):
+        pass
 
-        transcript = available[0]
-        segments = transcript.translate("en").fetch()
-        text = " ".join(seg.text for seg in segments)
-        return text.strip(), metadata
+    # Stage 2: No captions at all → yt-dlp audio download + Whisper transcription
+    log.info("  No captions found — falling back to yt-dlp + Whisper")
+    text = _audio_to_transcript(url)
+    return text, metadata
 
-    except (NoTranscriptFound, TranscriptsDisabled) as e:
-        raise e
+
+# ── Instagram ──────────────────────────────────────────────────────────────────
+
+def _ingest_instagram(url: str) -> tuple[str, dict]:
+    """
+    Instagram reels/posts: yt-dlp downloads audio, Whisper transcribes.
+    Returns (transcript, {}) — no oEmbed equivalent for Instagram metadata.
+    """
+    log.info("  Instagram: downloading audio via yt-dlp")
+    text = _audio_to_transcript(url)
+    return text, {}
+
+
+# ── Shared: audio download + transcription ─────────────────────────────────────
+
+def _audio_to_transcript(url: str) -> str:
+    """
+    Download audio from any yt-dlp-supported URL and transcribe with Whisper large-v3.
+
+    - Audio saved to a temp directory, deleted after transcription.
+    - Non-English audio auto-translated to English (Whisper task="translate").
+    - Model loaded once as a singleton for the pipeline run.
+
+    Free, local, no usage limits. Requires: yt-dlp, faster-whisper, ffmpeg.
+    """
+    import yt_dlp
+    import os
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        audio_path = os.path.join(tmpdir, "audio")
+
+        ydl_opts = {
+            "format": "bestaudio/best",
+            "outtmpl": audio_path,
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": "64",   # mono speech — 64kbps is plenty
+            }],
+            "quiet": True,
+            "no_warnings": True,
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        audio_file = audio_path + ".mp3"
+        if not os.path.exists(audio_file):
+            # yt-dlp may use a different extension — find whatever was created
+            files = [f for f in os.listdir(tmpdir) if f.startswith("audio")]
+            if not files:
+                raise RuntimeError(f"yt-dlp produced no audio file for: {url}")
+            audio_file = os.path.join(tmpdir, files[0])
+
+        model = _get_whisper_model()
+
+        # First pass: detect language
+        segments, info = model.transcribe(audio_file, beam_size=5)
+        detected_lang = info.language
+        log.info(f"  Whisper detected language: {detected_lang}")
+
+        if detected_lang == "en":
+            text = " ".join(seg.text for seg in segments)
+        else:
+            # Non-English → translate to English in transcription pass
+            log.info(f"  Translating {detected_lang} → English via Whisper")
+            segments, _ = model.transcribe(audio_file, task="translate", beam_size=5)
+            text = " ".join(seg.text for seg in segments)
+
+        return text.strip()
 
 
 # ── Articles ───────────────────────────────────────────────────────────────────
 
 def _ingest_article_url(url: str) -> str:
-    """
-    Fetch and convert a web article to markdown using markitdown.
-    """
+    """Fetch and convert a web article to markdown using markitdown."""
     from markitdown import MarkItDown
     md = MarkItDown()
     result = md.convert(url)
@@ -119,9 +213,7 @@ def _ingest_article_url(url: str) -> str:
 
 
 def _ingest_document(path: Path) -> str:
-    """
-    Convert a local document (PDF, DOCX, image, etc.) to markdown using markitdown.
-    """
+    """Convert a local document (PDF, DOCX, image, etc.) to markdown using markitdown."""
     from markitdown import MarkItDown
     md = MarkItDown()
     result = md.convert(str(path))
