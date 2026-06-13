@@ -32,30 +32,31 @@ def ingest(item: InboxItem) -> str:
 def _ingest_youtube(url: str) -> str:
     """
     Fetch YouTube transcript via youtube-transcript-api.
-    Priority: English captions → auto-translated English → any available.
+    Priority: English captions → any available.
     Returns clean transcript text (no timestamps).
     """
-    from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
+    from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
     import re
 
-    # Extract video ID
-    match = re.search(r"(?:v=|youtu\.be/)([\w-]+)", url)
+    # Extract video ID — handles watch?v=, youtu.be/, live/, shorts/, embed/
+    match = re.search(r"(?:v=|youtu\.be/|live/|shorts/|embed/)([\w-]+)", url)
     if not match:
         raise ValueError(f"Could not extract video ID from URL: {url}")
     video_id = match.group(1)
 
-    transcript_list = YouTubeTranscriptApi.list_transcripts(video_id)
+    api = YouTubeTranscriptApi()
 
-    # Try English first (manual captions)
+    # Try English first
     try:
-        transcript = transcript_list.find_transcript(["en"])
-        segments = transcript.fetch()
+        segments = api.fetch(video_id, languages=["en"])
     except NoTranscriptFound:
-        # Fall back: find any transcript and translate to English
-        available = list(transcript_list)
-        if not available:
+        try:
+            # Fall back: try any available language
+            transcripts = api.list(video_id)
+            # Fetch the first available transcript
+            segments = api.fetch(video_id)
+        except (NoTranscriptFound, TranscriptsDisabled):
             raise NoTranscriptFound(video_id, [], [])
-        segments = available[0].translate("en").fetch()
 
     text = " ".join(seg.text for seg in segments)
     return text.strip()

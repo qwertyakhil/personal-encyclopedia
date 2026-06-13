@@ -20,6 +20,9 @@ import frontmatter
 YOUTUBE_PATTERNS = [
     r"(?:https?://)?(?:www\.)?youtube\.com/watch\?v=[\w-]+",
     r"(?:https?://)?(?:www\.)?youtu\.be/[\w-]+",
+    r"(?:https?://)?(?:www\.)?youtube\.com/live/[\w-]+",
+    r"(?:https?://)?(?:www\.)?youtube\.com/shorts/[\w-]+",
+    r"(?:https?://)?(?:www\.)?youtube\.com/embed/[\w-]+",
 ]
 INSTAGRAM_PATTERNS = [
     r"(?:https?://)?(?:www\.)?instagram\.com/(?:p|reel|tv)/[\w-]+",
