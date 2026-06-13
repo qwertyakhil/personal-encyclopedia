@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+    <!-- Job label — must match filename -->
+    <key>Label</key>
+    <string>com.akhil.knowledge-pipeline</string>
+
+    <!-- Command to run -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/akhilsharma/.venvs/knowledge-pipeline/bin/python</string>
+        <string>/Users/akhilsharma/Library/CloudStorage/GoogleDrive-akhilapna@gmail.com/My Drive/Claude Personal Encyclopedia/knowledge-pipeline/run.py</string>
+    </array>
+
+    <!-- Run at 2:00 AM every night -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>2</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- Catch up if Mac was asleep at 2am — runs as soon as it wakes -->
+    <key>StartInterval</key>
+    <integer>86400</integer>
+
+    <!-- Log stdout and stderr to vault system folder -->
+    <key>StandardOutPath</key>
+    <string>/Users/akhilsharma/Library/Mobile Documents/iCloud~md~obsidian/Documents/Personal Encyclopedia/90-System/launchd-stdout.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/akhilsharma/Library/Mobile Documents/iCloud~md~obsidian/Documents/Personal Encyclopedia/90-System/launchd-stderr.log</string>
+
+    <!-- Environment: inherit PATH so venv python finds its packages -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/akhilsharma/.venvs/knowledge-pipeline/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
+        <key>HOME</key>
+        <string>/Users/akhilsharma</string>
+    </dict>
+
+    <!-- Keep job alive if it crashes; don't throttle restarts -->
+    <key>RunAtLoad</key>
+    <false/>
+
+</dict>
+</plist>
