@@ -32,8 +32,8 @@ def ingest(item: InboxItem) -> str:
 def _ingest_youtube(url: str) -> str:
     """
     Fetch YouTube transcript via youtube-transcript-api.
-    Priority: English captions → any available.
-    Returns clean transcript text (no timestamps).
+    Priority: English captions → translate any available language to English.
+    Always returns English text — Hindi/Hinglish is translated at fetch time.
     """
     from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound, TranscriptsDisabled
     import re
@@ -46,20 +46,29 @@ def _ingest_youtube(url: str) -> str:
 
     api = YouTubeTranscriptApi()
 
-    # Try English first
+    # Try English captions first (manual or auto-generated)
     try:
         segments = api.fetch(video_id, languages=["en"])
+        text = " ".join(seg.text for seg in segments)
+        return text.strip()
     except NoTranscriptFound:
-        try:
-            # Fall back: try any available language
-            transcripts = api.list(video_id)
-            # Fetch the first available transcript
-            segments = api.fetch(video_id)
-        except (NoTranscriptFound, TranscriptsDisabled):
+        pass
+
+    # No English captions — find any available transcript and translate to English
+    try:
+        transcript_list = api.list(video_id)
+        available = list(transcript_list)
+        if not available:
             raise NoTranscriptFound(video_id, [], [])
 
-    text = " ".join(seg.text for seg in segments)
-    return text.strip()
+        # Pick the first available transcript and translate to English
+        transcript = available[0]
+        segments = transcript.translate("en").fetch()
+        text = " ".join(seg.text for seg in segments)
+        return text.strip()
+
+    except (NoTranscriptFound, TranscriptsDisabled) as e:
+        raise e
 
 
 # ── Articles ───────────────────────────────────────────────────────────────────
